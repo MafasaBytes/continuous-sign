@@ -65,8 +65,9 @@ data/raw_data/phoenix-2014-multisigner/**/*.mp4
 data/raw_data/phoenix-2014-multisigner/**/*.avi
 data/raw_data/phoenix-2014-signerindependent-SI5/**/*.mp4
 data/raw_data/phoenix-2014-signerindependent-SI5/**/*.avi
-# Keep extracted features but add to gitignore if they get too large
-# data/features/**/*.npz
+data/** */
+data/features/**/*.npz
+data/
 
 # Model checkpoints - track small configs but not large weights
 models/**/*.pt
@@ -111,5 +112,17 @@ extraction_output.log
 feature-extraction-env.sh
 NUL
 
+# Checkpoints
+checkpoints/
+checkpoints/**/*.pt
+checkpoints/**/*.pth
+checkpoints/**/*.ckpt
+checkpoints/**/*.model
+checkpoints/**/*.model.pt
+checkpoints/**/*.model.pth
+checkpoints/**/*.model.ckpt
+checkpoints/**/*.model.pt
+
 # Archive - deprecated code
 archive/
+test/

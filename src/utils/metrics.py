@@ -1,181 +1,161 @@
-"""
-Evaluation metrics for sign language recognition.
-Implements WER (Word Error Rate) and SER (Sign Error Rate).
-"""
+"""Evaluation metrics for sign language recognition."""
 
 import numpy as np
 from typing import List, Tuple
-import editdistance
+from collections import Counter
 
 
-def calculate_wer(references: List[List[int]], hypotheses: List[List[int]]) -> Tuple[float, dict]:
+def edit_distance(s1: List[str], s2: List[str]) -> int:
     """
-    Calculate Word Error Rate (WER).
-
-    WER = (Substitutions + Deletions + Insertions) / Total_Reference_Words
-
+    Compute Levenshtein edit distance between two sequences.
+    
     Args:
-        references: List of reference sequences (ground truth)
-        hypotheses: List of hypothesis sequences (predictions)
-
+        s1: First sequence
+        s2: Second sequence
+    
     Returns:
-        (wer, detailed_stats)
+        Edit distance
     """
-    assert len(references) == len(hypotheses), "References and hypotheses must have same length"
-
-    total_substitutions = 0
-    total_deletions = 0
-    total_insertions = 0
-    total_reference_length = 0
-    total_distance = 0
-
-    for ref, hyp in zip(references, hypotheses):
-        # Calculate edit distance
-        distance = editdistance.eval(ref, hyp)
-        total_distance += distance
-        total_reference_length += len(ref)
-
-        # Detailed error counts (approximation using DP)
-        # For exact counts, need to backtrack through DP matrix
-        ref_len = len(ref)
-        hyp_len = len(hyp)
-
-        # Simple approximation
-        if hyp_len > ref_len:
-            total_insertions += (hyp_len - ref_len)
-        elif hyp_len < ref_len:
-            total_deletions += (ref_len - hyp_len)
-
-        # Remaining errors are substitutions
-        total_substitutions += distance - abs(ref_len - hyp_len)
-
-    wer = (total_distance / total_reference_length * 100) if total_reference_length > 0 else 0.0
-
-    stats = {
-        'wer': wer,
-        'total_errors': total_distance,
-        'substitutions': total_substitutions,
-        'deletions': total_deletions,
-        'insertions': total_insertions,
-        'total_words': total_reference_length,
-        'num_sequences': len(references),
-    }
-
-    return wer, stats
+    m, n = len(s1), len(s2)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    
+    for i in range(m + 1):
+        dp[i][0] = i
+    for j in range(n + 1):
+        dp[0][j] = j
+    
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if s1[i-1] == s2[j-1]:
+                dp[i][j] = dp[i-1][j-1]
+            else:
+                dp[i][j] = 1 + min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
+    
+    return dp[m][n]
 
 
-def calculate_ser(references: List[List[int]], hypotheses: List[List[int]]) -> Tuple[float, dict]:
+def word_error_rate(references: List[List[str]], hypotheses: List[List[str]]) -> float:
     """
-    Calculate Sign Error Rate (SER) - sentence-level accuracy.
+    Compute Word Error Rate (WER).
 
-    SER = Number of incorrect sequences / Total sequences
+    WER = (S + D + I) / N
+    where S = substitutions, D = deletions, I = insertions, N = total words in reference
 
     Args:
         references: List of reference sequences
         hypotheses: List of hypothesis sequences
 
     Returns:
-        (ser, detailed_stats)
+        Word Error Rate (0.0 to 1.0, where 1.0 = 100% error)
     """
-    assert len(references) == len(hypotheses)
+    if not references:
+        return 0.0
 
-    correct = 0
-    total = len(references)
+    total_errors = 0
+    total_words = 0
 
     for ref, hyp in zip(references, hypotheses):
-        if ref == hyp:
-            correct += 1
+        # Skip empty references (no ground truth to compare against)
+        if len(ref) == 0:
+            continue
 
-    ser = ((total - correct) / total * 100) if total > 0 else 0.0
-    accuracy = (correct / total * 100) if total > 0 else 0.0
+        # If hypothesis is empty but reference has words, all words are deletions
+        # If hypothesis has words, compute the edit distance
+        errors = edit_distance(ref, hyp)
+        total_errors += errors
+        total_words += len(ref)
 
-    stats = {
-        'ser': ser,
-        'sentence_accuracy': accuracy,
-        'correct_sequences': correct,
-        'total_sequences': total,
-        'incorrect_sequences': total - correct,
-    }
+    # If all references were empty (no ground truth), return 0
+    if total_words == 0:
+        return 0.0
 
-    return ser, stats
+    # WER can be > 1.0 if there are many insertions
+    # But typically we cap it at 1.0 for reporting
+    wer = total_errors / total_words
+    return min(wer, 1.0)
 
 
-def calculate_per_class_accuracy(
-    references: List[List[int]],
-    hypotheses: List[List[int]],
-    num_classes: int
-) -> dict:
+def sign_error_rate(references: List[List[str]], hypotheses: List[List[str]]) -> float:
     """
-    Calculate per-class recognition accuracy.
-
+    Compute Sign Error Rate (SER) - same as WER but for isolated signs.
+    
     Args:
         references: List of reference sequences
         hypotheses: List of hypothesis sequences
-        num_classes: Total number of classes
-
+    
     Returns:
-        Dictionary with per-class statistics
+        Sign Error Rate
     """
-    class_correct = np.zeros(num_classes)
-    class_total = np.zeros(num_classes)
-
-    for ref, hyp in zip(references, hypotheses):
-        # Count ground truth occurrences
-        for token in ref:
-            if token < num_classes:
-                class_total[token] += 1
-
-        # Count correct predictions
-        for r_token, h_token in zip(ref, hyp):
-            if r_token == h_token and r_token < num_classes:
-                class_correct[r_token] += 1
-
-    # Calculate per-class accuracy
-    class_accuracy = np.divide(
-        class_correct,
-        class_total,
-        out=np.zeros_like(class_correct),
-        where=class_total > 0
-    )
-
-    return {
-        'class_accuracy': class_accuracy,
-        'class_correct': class_correct,
-        'class_total': class_total,
-        'mean_class_accuracy': np.mean(class_accuracy[class_total > 0]) * 100 if np.any(class_total > 0) else 0.0,
-    }
+    return word_error_rate(references, hypotheses)
 
 
-def format_metrics_report(wer_stats: dict, ser_stats: dict, split_name: str = "Test") -> str:
+def compute_wer(references, hypotheses):
     """
-    Format metrics into a readable report.
+    Compute WER from string or list sequences.
 
     Args:
-        wer_stats: WER statistics dictionary
-        ser_stats: SER statistics dictionary
-        split_name: Name of the dataset split
+        references: List of reference strings or list of lists
+        hypotheses: List of hypothesis strings or list of lists
 
     Returns:
-        Formatted string report
+        WER percentage
     """
-    report = f"\n{'='*60}\n"
-    report += f"{split_name} Set Evaluation Results\n"
-    report += f"{'='*60}\n\n"
+    # Convert to token lists if needed
+    if references and isinstance(references[0], str):
+        ref_tokens = [ref.split() for ref in references]
+    else:
+        ref_tokens = references
 
-    report += f"Word Error Rate (WER):\n"
-    report += f"  WER: {wer_stats['wer']:.2f}%\n"
-    report += f"  Total Errors: {wer_stats['total_errors']}\n"
-    report += f"    - Substitutions: {wer_stats['substitutions']}\n"
-    report += f"    - Deletions: {wer_stats['deletions']}\n"
-    report += f"    - Insertions: {wer_stats['insertions']}\n"
-    report += f"  Total Words: {wer_stats['total_words']}\n"
-    report += f"  Sequences: {wer_stats['num_sequences']}\n\n"
+    if hypotheses and isinstance(hypotheses[0], str):
+        hyp_tokens = [hyp.split() for hyp in hypotheses]
+    else:
+        hyp_tokens = hypotheses
+    
+    wer = word_error_rate(ref_tokens, hyp_tokens)
 
-    report += f"Sentence Error Rate (SER):\n"
-    report += f"  SER: {ser_stats['ser']:.2f}%\n"
-    report += f"  Sentence Accuracy: {ser_stats['sentence_accuracy']:.2f}%\n"
-    report += f"  Correct Sequences: {ser_stats['correct_sequences']}/{ser_stats['total_sequences']}\n\n"
+    # Return WER as percentage
+    return wer * 100.0
 
-    report += f"{'='*60}\n"
 
-    return report
+def compute_ser(references, hypotheses):
+    """
+    Compute SER from string or list sequences.
+
+    Args:
+        references: List of reference strings or list of lists
+        hypotheses: List of hypothesis strings or list of lists
+
+    Returns:
+        SER percentage
+    """
+    return compute_wer(references, hypotheses)  # SER is same as WER for sign language
+
+
+def bleu_score(references: List[List[str]], hypotheses: List[List[str]], n: int = 4) -> float:
+    """
+    Compute BLEU score (simplified version).
+    
+    Args:
+        references: List of reference sequences
+        hypotheses: List of hypothesis sequences
+        n: Maximum n-gram order
+    
+    Returns:
+        BLEU score
+    """
+    # Simplified BLEU - just for reference
+    # Full BLEU implementation would require more sophisticated n-gram matching
+    if len(references) != len(hypotheses):
+        return 0.0
+    
+    matches = 0
+    total = 0
+    
+    for ref, hyp in zip(references, hypotheses):
+        ref_set = set(ref)
+        hyp_set = set(hyp)
+        matches += len(ref_set & hyp_set)
+        total += len(ref_set)
+    
+    return matches / total if total > 0 else 0.0
+
